@@ -1,13 +1,12 @@
-
-"Index": int
-"Customer Id"
-"First Name"
-"Last Name"
-"Company"
-"City"
-"Country"
-"Phone 1"
-"Phone 2"
-"Email"
-"Subscription Date"
-"Website"
+columns:
+  precio:
+    data_type: number
+    min: 0
+    max: 1000000
+    deimal_places: 2
+  email:
+    data_type: string
+    pattern: "^[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}$"
+  fecha:
+    data_type: date
+    before: today

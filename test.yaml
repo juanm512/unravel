@@ -1,0 +1,16 @@
+columns:
+  precio:
+    required: true
+    unique: false
+    rule:
+      type: numeric
+      min: 0
+      max: 1000000
+  email:
+    required: true
+    rule:
+      type: email
+  fecha:
+    rule:
+      type: date
+      before: "2025-01-01"

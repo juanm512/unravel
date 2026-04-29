@@ -1,7 +1,10 @@
 use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
-use csv::{Reader, ReaderBuilder};
 use anyhow::Result;
+
+use crate::reader::yaml;
+
+mod reader;
 
 #[derive(Parser)]
 #[command(name = "file-check", version = "1.0")]
@@ -15,7 +18,7 @@ struct Cli {
     #[arg(long, default_value = "check")]
     mode: Mode,
 
-    #[arg(long, default_value = "false", action = clap::ArgAction::SetTrue)]
+    #[arg(long, default_value = "false")]
     verbose: bool,
 }
 
@@ -35,20 +38,14 @@ fn main() -> Result<()> {
             println!("File path: {:?}", args.file);
             println!("Rules path: {:?}", args.rules);
         }
-        let reader = ReaderBuilder::new();
-            
-        let file_data = reader.from_path(&args.file);
+        let (headers, records) = reader::csv::load(&args.file)?;
         // let rules_data = (&args.rules); // the rules file is a yaml
-        match file_data  {
-            Ok(mut rdr) => {
-                println!("Successfully read file, headers {:?}", rdr.headers().unwrap());
-                println!("Rows count: {:?}", rdr.records().count());
-                println!("Headers count: {:?}", rdr.headers().unwrap().iter().count());
+        println!("Headers: {:?}", headers);
+        println!("Records: {:?}", records);
 
-                
-            }
-            Err(e) => eprintln!("Error reading file: {}", e),
-        }
+
+        let rules = yaml::load(&args.rules)?;
+        println!("{:#?}", rules);
 
 
     } else {
