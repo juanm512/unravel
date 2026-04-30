@@ -39,16 +39,6 @@ impl Default for ColumnsConfig {
         }
     }
 }
-impl ColumnsConfig {
-    fn validate(&self, headers: &[String], record: &csv::StringRecord) -> Option<crate::validator::ValidationError> {
-        // Aquí va la lógica de validación para cada tipo de regla. Por ejemplo:
-        // - Si self.rule es ColumnRule::Integer, verificar que el valor sea un entero y cumpla con los límites min y max.
-        // - Si self.rule es ColumnRule::Text, verificar que el valor cumpla con el patrón regex si es que se especifica.
-        // - Si self.required es true, verificar que el valor no esté vacío.
-        // - Si self.unique es true, verificar que el valor no se haya visto antes en esta columna.
-        None
-    }
-}
 
 #[derive(Debug, Deserialize)]
 pub struct Rules {

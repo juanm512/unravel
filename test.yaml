@@ -4,7 +4,7 @@ columns:
     unique: false
     rule:
       type: integer
-      min: 100
+      min: 10
       max: 2024
   precio2:
     required: true

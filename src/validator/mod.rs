@@ -18,6 +18,7 @@ pub struct ValidationReport {
     // Pista: necesitás saber qué falló, en qué columna, en qué fila
     
     pub errors: Vec<ValidationError>,
+    pub rows_with_errors: HashSet<usize>,
 
     pub total_rows: usize,
     pub total_errors: usize,
@@ -26,14 +27,16 @@ impl ValidationReport {
     pub fn new() -> Self {
         ValidationReport {
             errors: Vec::new(),
+            rows_with_errors: HashSet::new(),
             total_rows: 0,
             total_errors: 0,
         }
     }
 
-    pub fn add_error(&mut self, _row: usize, error: ValidationError) {
+    pub fn add_error(&mut self, row: usize, error: ValidationError) {
         self.errors.push(error);
         self.total_errors += 1;
+        self.rows_with_errors.insert(row);
     }
 
     pub fn set_total_rows(&mut self, total: usize) {
@@ -123,8 +126,21 @@ pub fn validate(
 
 pub fn validate_email(email: &str) -> bool {
     // Un regex simple para validar emails. No es perfecto, pero cubre la mayoría de los casos comunes.
+    if email.is_empty() {
+        eprintln!("[DEBUG] Email validation failed: email is empty");
+        return false;
+    }
+    
     let email_regex = Regex::new(r"^[^\s@]+@[^\s@]+\.[^\s@]+$").unwrap();
-    email_regex.is_match(email)
+    let is_valid = email_regex.is_match(email);
+    
+    if !is_valid {
+        eprintln!("[DEBUG] Email validation failed for '{}': does not match email pattern", email);
+    } else {
+        eprintln!("[DEBUG] Email validation passed for '{}'", email);
+    }
+    
+    is_valid
 }
 
 pub fn validate_pattern(value: &str, pattern: &Regex) -> bool {
