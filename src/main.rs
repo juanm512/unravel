@@ -4,6 +4,7 @@ use anyhow::Result;
 
 use crate::reader::yaml;
 
+mod validator;
 mod reader;
 
 #[derive(Parser)]
@@ -41,13 +42,23 @@ fn main() -> Result<()> {
         let (headers, records) = reader::csv::load(&args.file)?;
         // let rules_data = (&args.rules); // the rules file is a yaml
         println!("Headers: {:?}", headers);
-        println!("Records: {:?}", records);
+        // println!("Records: {:?}", records);
 
 
         let rules = yaml::load(&args.rules)?;
         println!("{:#?}", rules);
 
-
+        let report = validator::validate(&headers, &records, &rules);
+        println!("Validation Report:");
+        println!("Total rows: {}", report.total_rows);
+        println!("Total errors: {}", report.total_errors);
+        
+        let mut row_line = 0;
+        for error in report.errors {
+            if !error.row.eq(&row_line) { row_line = error.row.clone(); print!("\nRow {:?}: \n", &row_line); };
+            println!("\tColumn '{}': {} (Value: {:?})", error.column, error.message, error.value);
+        }
+        
     } else {
         println!("Not Found {:?}", if !args.file.exists() { "file" } else { "rules" });
     }

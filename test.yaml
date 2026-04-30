@@ -3,13 +3,28 @@ columns:
     required: true
     unique: false
     rule:
-      type: numeric
-      min: 0
-      max: 1000000
+      type: integer
+      min: 100
+      max: 2024
+  precio2:
+    required: true
+    unique: false
+    rule:
+      type: float
+      min: 10.0
+      max: 20.24
+  precio3:
+    required: true
+    unique: false
+    rule:
+      type: integer
+      min: 1011
+      max: 2022
   email:
     required: true
     rule:
       type: email
+      min: 5
   fecha:
     rule:
       type: date

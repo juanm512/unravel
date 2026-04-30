@@ -1,9 +1,8 @@
 columns:
   precio:
-    data_type: number
+    data_type: float
     min: 0
     max: 1000000
-    deimal_places: 2
   email:
     data_type: string
     pattern: "^[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}$"
