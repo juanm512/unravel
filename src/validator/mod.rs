@@ -14,9 +14,6 @@ pub struct ValidationError {
 }
 
 pub struct ValidationReport {
-    // ¿qué campos pondrías acá?
-    // Pista: necesitás saber qué falló, en qué columna, en qué fila
-    
     pub errors: Vec<ValidationError>,
     pub rows_with_errors: HashSet<usize>,
 
@@ -51,22 +48,42 @@ pub fn validate(
 ) -> ValidationReport {
     let mut report = ValidationReport::new();
 
+    let email_regex = Regex::new(r"^[^\s@]+@[^\s@]+\.[^\s@]+$").unwrap();
     let mut patterns_regexs: HashMap<String, Regex> = HashMap::new();
     rules.columns.iter().for_each(|rule: (&String, &crate::reader::yaml::ColumnsConfig)| {
         if let ColumnRule::Text { pattern: Some(p) } = &rule.1.rule {
             patterns_regexs.insert(rule.0.clone(), Regex::new(p).unwrap());
         }
     });
+    let mut unique_values: HashMap<&str, HashMap<String, Vec<usize>>> = HashMap::new();
 
     for (i, record) in records.iter().enumerate() {
+        // iteramos sobre cada regla y validamos la columna correspondiente
         for rule in &rules.columns {
             let column_name = rule.0;
-            let column_rule = &rule.1.rule;
+            let column_config = &rule.1;
 
             if let Some(column_index) = headers.iter().position(|h| h == column_name) {
                 let value = record.get(column_index).unwrap_or("");
 
-                let error_message = match column_rule {
+                if column_config.required && value.trim().is_empty() {
+                    report.add_error(i + 1, ValidationError {
+                        column: column_name.clone(),
+                        row: i + 1,
+                        message: format!("Value in column '{}' is required", column_name),
+                        value: Some(value.to_string()),
+                    });
+                    continue; // Si es requerido y está vacío, no hace falta validar el formato
+                }
+                if value.trim().is_empty() {
+                    continue; // no-required y vacío → skip tipo
+                }
+
+                if column_config.unique {
+                    unique_values.entry(column_name).or_insert_with(HashMap::new).entry(value.to_string()).or_insert_with(Vec::new).push(i + 1);
+                }
+
+                let error_message = match &column_config.rule {
                     ColumnRule::Text { pattern } => {
                         if let Some(p) = pattern {
                             if !validate_pattern(value, patterns_regexs.get(column_name).unwrap()) {
@@ -100,7 +117,7 @@ pub fn validate(
                         }
                     }
                     ColumnRule::Email => {
-                        if !validate_email(value) {
+                        if !validate_email(value, &email_regex) {
                             Some(format!("Value '{}' is not a valid email address", value))
                         } else {
                             None
@@ -119,18 +136,35 @@ pub fn validate(
             }
         }
     }
+
+    // Validar unicidad después de procesar todas las filas
+    for (column_name, values_map) in unique_values {
+        for (value, rows) in values_map {
+            if rows.len() > 1 {
+                let Some((_first, elements)) = rows.split_first() else { continue };
+                for row in elements {
+                    report.add_error(*row, ValidationError {
+                        column: column_name.to_string(),
+                        row: *row,
+                        message: format!("Value '{}' is not unique in column '{}'", value, column_name),
+                        value: Some(value.clone()),
+                    });
+                }
+            }
+        }
+    }
+
     report.set_total_rows(records.len());
     report
 }
 
 
-pub fn validate_email(email: &str) -> bool {
+pub fn validate_email(email: &str, email_regex: &Regex) -> bool {
     // Un regex simple para validar emails. No es perfecto, pero cubre la mayoría de los casos comunes.
     if email.is_empty() {
         return false;
     }
-    
-    let email_regex = Regex::new(r"^[^\s@]+@[^\s@]+\.[^\s@]+$").unwrap();
+
     email_regex.is_match(email)
 }
 
