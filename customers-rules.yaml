@@ -1,11 +1,44 @@
-columns:
-  precio:
-    data_type: float
-    min: 0
-    max: 1000000
-  email:
-    data_type: string
-    pattern: "^[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}$"
-  fecha:
-    data_type: date
-    before: today
+columns:                                                                                                                                                     
+    Index:                                                                                                                                                     
+      rule:                                                                                                                                                    
+        type: integer                                                                                                                                          
+        min: 1    
+        max: 100000
+      required: true
+      unique: true
+
+    Customer Id:
+      rule:
+        type: text
+        pattern: "^[a-fA-F0-9]{15}$"
+      required: true
+      unique: true
+
+    First Name:
+      rule:
+        type: text
+      required: true
+
+    Last Name:
+      rule:
+        type: text
+      required: true
+
+    Email:
+      rule:
+        type: email
+      required: true
+      unique: true
+
+    Subscription Date:
+      rule:
+        type: date
+        after: "2019-12-31"
+        before: "2026-01-01"
+      required: true
+
+    Website:
+      rule:
+        type: text
+        pattern: "^https?://"
+      required: true

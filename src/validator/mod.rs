@@ -1,5 +1,4 @@
-
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, hash_map::Entry};
 
 use chrono::NaiveDate;
 use regex::Regex;
@@ -55,7 +54,23 @@ pub fn validate(
             patterns_regexs.insert(rule.0.clone(), Regex::new(p).unwrap());
         }
     });
-    let mut unique_values: HashMap<&str, HashMap<String, Vec<usize>>> = HashMap::new();
+    let columns_indexes: HashMap<&str, usize> = headers
+      .iter()
+      .enumerate()
+      .map(|(i, h)| (h.as_str(), i))
+      .collect();
+    let pre_parsed: HashMap<&str, (Option<NaiveDate>, Option<NaiveDate>)> = rules.columns
+      .iter()
+      .filter_map(|(name, config)| {
+          if let ColumnRule::Date { before, after } = &config.rule {
+              let b = before.as_deref().and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+              let a = after.as_deref().and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+              Some((name.as_str(), (b, a)))
+          } else { None }
+      })
+      .collect();
+
+    let mut unique_values: HashMap<&str, HashMap<String, usize>> = HashMap::new();
 
     for (i, record) in records.iter().enumerate() {
         // iteramos sobre cada regla y validamos la columna correspondiente
@@ -63,10 +78,11 @@ pub fn validate(
             let column_name = rule.0;
             let column_config = &rule.1;
 
-            if let Some(column_index) = headers.iter().position(|h| h == column_name) {
+           if let Some(&column_index) = columns_indexes.get(column_name.as_str()) {
                 let value = record.get(column_index).unwrap_or("");
+                let is_empty = value.trim().is_empty();
 
-                if column_config.required && value.trim().is_empty() {
+                if column_config.required && is_empty {
                     report.add_error(i + 1, ValidationError {
                         column: column_name.clone(),
                         row: i + 1,
@@ -75,12 +91,23 @@ pub fn validate(
                     });
                     continue; // Si es requerido y está vacío, no hace falta validar el formato
                 }
-                if value.trim().is_empty() {
+                if is_empty {
                     continue; // no-required y vacío → skip tipo
                 }
 
                 if column_config.unique {
-                    unique_values.entry(column_name).or_insert_with(HashMap::new).entry(value.to_string()).or_insert_with(Vec::new).push(i + 1);
+                    match unique_values.entry(column_name).or_default().entry(value.to_string()) {
+                        Entry::Occupied(e) => {
+                            let existing_row = *e.get();
+                            report.add_error(i + 1, ValidationError {
+                                column: column_name.clone(),
+                                row: i + 1,
+                                message: format!("Value '{}' in column '{}' is duplicated (also found in row {})", value, column_name, existing_row),
+                                value: Some(value.to_string()),
+                            });
+                        },
+                        Entry::Vacant(e)   => { e.insert(i + 1); }
+                    }
                 }
 
                 let error_message = match &column_config.rule {
@@ -109,8 +136,9 @@ pub fn validate(
                             None
                         }
                     }
-                    ColumnRule::Date { before, after } => {
-                        if !validate_date(value, before.as_deref(), after.as_deref()) {
+                    ColumnRule::Date { before: _, after: _ } => {
+                        let (before_date, after_date) = pre_parsed.get(column_name.as_str()).unwrap_or(&(None, None));
+                        if !validate_date(value, *before_date, *after_date) {
                             Some(format!("Value '{}' is not a valid date within the specified range", value))
                         } else {
                             None
@@ -137,39 +165,17 @@ pub fn validate(
         }
     }
 
-    // Validar unicidad después de procesar todas las filas
-    for (column_name, values_map) in unique_values {
-        for (value, rows) in values_map {
-            if rows.len() > 1 {
-                let Some((_first, elements)) = rows.split_first() else { continue };
-                for row in elements {
-                    report.add_error(*row, ValidationError {
-                        column: column_name.to_string(),
-                        row: *row,
-                        message: format!("Value '{}' is not unique in column '{}'", value, column_name),
-                        value: Some(value.clone()),
-                    });
-                }
-            }
-        }
-    }
-
     report.set_total_rows(records.len());
     report
 }
 
 
 pub fn validate_email(email: &str, email_regex: &Regex) -> bool {
-    // Un regex simple para validar emails. No es perfecto, pero cubre la mayoría de los casos comunes.
-    if email.is_empty() {
-        return false;
-    }
-
     email_regex.is_match(email)
 }
 
 pub fn validate_pattern(value: &str, pattern: &Regex) -> bool {
-    return pattern.is_match(value)
+    pattern.is_match(value)
 }
 
 pub fn validate_integer(value: &str, min: Option<u64>, max: Option<u64>) -> bool {
@@ -206,20 +212,16 @@ pub fn validate_float(value: &str, min: Option<f64>, max: Option<f64>) -> bool {
     false
 }
 
-pub fn validate_date(value: &str, before: Option<&str>, after: Option<&str>) -> bool {
+pub fn validate_date(value: &str, before: Option<NaiveDate>, after: Option<NaiveDate>) -> bool {
     if let Ok(date) = NaiveDate::parse_from_str(value, "%Y-%m-%d") {
-        if let Some(before_str) = before {
-            if let Ok(before_date) = NaiveDate::parse_from_str(before_str, "%Y-%m-%d") {
-                if date >= before_date {
-                    return false;
-                }
+        if let Some(before_date) = before {
+            if date >= before_date {
+                return false;
             }
         }
-        if let Some(after_str) = after {
-            if let Ok(after_date) = NaiveDate::parse_from_str(after_str, "%Y-%m-%d") {
-                if date <= after_date {
-                    return false;
-                }
+        if let Some(after_date) = after {
+            if date <= after_date {
+                return false;
             }
         }
         return true;
