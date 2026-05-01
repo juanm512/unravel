@@ -127,20 +127,11 @@ pub fn validate(
 pub fn validate_email(email: &str) -> bool {
     // Un regex simple para validar emails. No es perfecto, pero cubre la mayoría de los casos comunes.
     if email.is_empty() {
-        eprintln!("[DEBUG] Email validation failed: email is empty");
         return false;
     }
     
     let email_regex = Regex::new(r"^[^\s@]+@[^\s@]+\.[^\s@]+$").unwrap();
-    let is_valid = email_regex.is_match(email);
-    
-    if !is_valid {
-        eprintln!("[DEBUG] Email validation failed for '{}': does not match email pattern", email);
-    } else {
-        eprintln!("[DEBUG] Email validation passed for '{}'", email);
-    }
-    
-    is_valid
+    email_regex.is_match(email)
 }
 
 pub fn validate_pattern(value: &str, pattern: &Regex) -> bool {
