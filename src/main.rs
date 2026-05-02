@@ -36,12 +36,14 @@ enum Mode {
 
 fn main() -> Result<()> {
     let args: Cli = Cli::parse();
-    println!("Mode: {:?}", args.mode);
-    println!("Threshold: {:?}", args.threshold);
-    println!("Verbose: {:?}", args.verbose);
-
-    println!("File path: {:?}", args.file);
-    println!("Rules path: {:?}", args.rules);
+    if args.verbose {
+        println!("Mode: {:?}", args.mode);
+        println!("Threshold: {:?}", args.threshold);
+        println!("Verbose: {:?}", args.verbose);
+        println!("File path: {:?}", args.file);
+        println!("Rules path: {:?}", args.rules);
+    }
+    
     
     let t = Instant::now();
     let (headers, records) = reader::csv::load(&args.file)?;
@@ -78,6 +80,8 @@ fn main() -> Result<()> {
     }
     
     if args.verbose {
+        println!("  threads:  {} / {} CPUs", rayon::current_num_threads(),
+               std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1));
         println!("  read:     {:?}", read_time);
         println!("  validate: {:?}", validate_time);
             if let Some(ct) = clean_time {                                                                                                                               

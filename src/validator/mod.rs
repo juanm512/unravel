@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet, hash_map::Entry};
 
+use anyhow::{Result};
+use rayon::prelude::*;
 use chrono::NaiveDate;
 use regex::Regex;
 
@@ -70,111 +72,150 @@ pub fn validate(
       })
       .collect();
 
-    let mut unique_values: HashMap<&str, HashMap<String, usize>> = HashMap::new();
-
     for column_name in rules.columns.keys() {
         if !columns_indexes.contains_key(column_name.as_str()) {
             eprintln!("[WARNING] Column '{}' defined in rules but not found in CSV", column_name);
         }
     }
 
-    for (i, record) in records.iter().enumerate() {
-        // iteramos sobre cada regla y validamos la columna correspondiente
-        for rule in &rules.columns {
-            let column_name = rule.0;
-            let column_config = &rule.1;
+    // fase 1
+    for error in validate_rows(records, rules, &columns_indexes, &pre_parsed, &patterns_regexs, &email_regex) {
+        report.add_error(error.row, error);
+    }
 
-           if let Some(&column_index) = columns_indexes.get(column_name.as_str()) {
-                let value = record.get(column_index).unwrap_or("");
-                let is_empty = value.trim().is_empty();
-
-                if column_config.required && is_empty {
-                    report.add_error(i + 1, ValidationError {
-                        column: column_name.clone(),
-                        row: i + 1,
-                        message: format!("Value in column '{}' is required", column_name),
-                        value: Some(value.to_string()),
-                    });
-                    continue; // Si es requerido y está vacío, no hace falta validar el formato
-                }
-                if is_empty {
-                    continue; // no-required y vacío → skip tipo
-                }
-
-                if column_config.unique {
-                    match unique_values.entry(column_name).or_default().entry(value.to_string()) {
-                        Entry::Occupied(e) => {
-                            let existing_row = *e.get();
-                            report.add_error(i + 1, ValidationError {
-                                column: column_name.clone(),
-                                row: i + 1,
-                                message: format!("Value '{}' in column '{}' is duplicated (also found in row {})", value, column_name, existing_row),
-                                value: Some(value.to_string()),
-                            });
-                        },
-                        Entry::Vacant(e)   => { e.insert(i + 1); }
-                    }
-                }
-
-                let error_message = match &column_config.rule {
-                    ColumnRule::Text { pattern } => {
-                        if let Some(p) = pattern {
-                            if !validate_pattern(value, patterns_regexs.get(column_name).unwrap()) {
-                                Some(format!("Value '{}' does not match pattern '{}'", value, p))
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    }
-                    ColumnRule::Integer { min, max } => {
-                        if !validate_integer(value, *min, *max) {
-                            Some(format!("Value '{}' is not a valid integer within the specified range", value))
-                        } else {
-                            None
-                        }
-                    }
-                    ColumnRule::Float { min, max } => {
-                        if !validate_float(value, *min, *max) {
-                            Some(format!("Value '{}' is not a valid float within the specified range", value))
-                        } else {
-                            None
-                        }
-                    }
-                    ColumnRule::Date { before: _, after: _ } => {
-                        let (before_date, after_date) = pre_parsed.get(column_name.as_str()).unwrap_or(&(None, None));
-                        if !validate_date(value, *before_date, *after_date) {
-                            Some(format!("Value '{}' is not a valid date within the specified range", value))
-                        } else {
-                            None
-                        }
-                    }
-                    ColumnRule::Email => {
-                        if !validate_email(value, &email_regex) {
-                            Some(format!("Value '{}' is not a valid email address", value))
-                        } else {
-                            None
-                        }
-                    }
-                };
-
-                if let Some(message) = error_message {
-                    report.add_error(i + 1, ValidationError {
-                        column: column_name.clone(),
-                        row: i + 1,
-                        message,
-                        value: Some(value.to_string()),
-                    });
-                }
-            }
-        }
+    // fase 2
+    for error in validate_unique(records, rules, &columns_indexes) {
+        report.add_error(error.row, error);
     }
 
     report.set_total_rows(records.len());
     report
 }
 
+// Validación de formato (primera fase)
+fn validate_rows(
+    records: &[csv::StringRecord],
+    rules: &Rules,
+    columns_indexes: &HashMap<&str, usize>,
+    pre_parsed: &HashMap<&str, (Option<NaiveDate>, Option<NaiveDate>)>,
+    patterns_regexs: &HashMap<String, Regex>,
+    email_regex: &Regex,
+) -> Vec<ValidationError> {
+    records
+        .par_iter()
+        .enumerate()
+        .flat_map(|(i, record)| {
+            let mut errors: Vec<ValidationError> = Vec::new();
+            for (column_name, column_config) in &rules.columns {
+                if let Some(&column_index) = columns_indexes.get(column_name.as_str()) {
+                    let value = record.get(column_index).unwrap_or("");
+                    let is_empty = value.trim().is_empty();
+
+                    if column_config.required && is_empty {
+                        errors.push(ValidationError {
+                            column: column_name.clone(),
+                            row: i + 1,
+                            message: format!("Value in column '{}' is required", column_name),
+                            value: Some(value.to_string()),
+                        });
+                        continue;
+                    }
+                    if is_empty { continue; }
+
+                    let error_message = match &column_config.rule {
+                        ColumnRule::Text { pattern } => {
+                            if let Some(p) = pattern {
+                                if !validate_pattern(value, patterns_regexs.get(column_name).unwrap()) {
+                                    Some(format!("Value '{}' does not match pattern '{}'", value, p))
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        }
+                        ColumnRule::Integer { min, max } => {
+                            if !validate_integer(value, *min, *max) {
+                                Some(format!("Value '{}' is not a valid integer within the specified range", value))
+                            } else {
+                                None
+                            }
+                        }
+                        ColumnRule::Float { min, max } => {
+                            if !validate_float(value, *min, *max) {
+                                Some(format!("Value '{}' is not a valid float within the specified range", value))
+                            } else {
+                                None
+                            }
+                        }
+                        ColumnRule::Date { before: _, after: _ } => {
+                            let (before_date, after_date) = pre_parsed.get(column_name.as_str()).unwrap_or(&(None, None));
+                            if !validate_date(value, *before_date, *after_date) {
+                                Some(format!("Value '{}' is not a valid date within the specified range", value))
+                            } else {
+                                None
+                            }
+                        }
+                        ColumnRule::Email => {
+                            if !validate_email(value, &email_regex) {
+                                Some(format!("Value '{}' is not a valid email address", value))
+                            } else {
+                                None
+                            }
+                        }
+                    };
+
+                    if let Some(message) = error_message {
+                        errors.push(ValidationError {
+                            column: column_name.clone(),
+                            row: i + 1,
+                            message,
+                            value: Some(value.to_string()),
+                        });
+                    }
+                }
+            }
+            errors
+        })
+        .collect()
+}
+
+// Validación de unicidad (segunda fase, después de validar formato para evitar falsos positivos)
+fn validate_unique(
+    records: &[csv::StringRecord],
+    rules: &Rules,
+    columns_indexes: &HashMap<&str, usize>,
+) -> Vec<ValidationError> {
+    let mut unique_values: HashMap<&str, HashMap<String, usize>> = HashMap::new();
+    let mut errors: Vec<ValidationError> = Vec::new();
+
+    for (i, record) in records.iter().enumerate() {
+        for (column_name, column_config) in &rules.columns {
+            if !column_config.unique { continue; }
+            if let Some(&column_index) = columns_indexes.get(column_name.as_str()) {
+                let value = record.get(column_index).unwrap_or("");
+                if value.trim().is_empty() { continue; }
+
+                match unique_values.entry(column_name).or_default().entry(value.to_string()) {
+                    Entry::Occupied(e) => {
+                        errors.push(ValidationError {
+                            column: column_name.clone(),
+                            row: i + 1,
+                            message: format!("Value '{}' in column '{}' is duplicated (also found in row {})", value, column_name, *e.get()),
+                            value: Some(value.to_string()),
+                        });
+                    }
+                    Entry::Vacant(e) => { e.insert(i + 1); }
+                }
+            }
+        }
+    }
+    errors
+}
+
+
+
+// Validaciones específicas por tipo
 
 pub fn validate_email(email: &str, email_regex: &Regex) -> bool {
     email_regex.is_match(email)
