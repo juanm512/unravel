@@ -72,6 +72,12 @@ pub fn validate(
 
     let mut unique_values: HashMap<&str, HashMap<String, usize>> = HashMap::new();
 
+    for column_name in rules.columns.keys() {
+        if !columns_indexes.contains_key(column_name.as_str()) {
+            eprintln!("[WARNING] Column '{}' defined in rules but not found in CSV", column_name);
+        }
+    }
+
     for (i, record) in records.iter().enumerate() {
         // iteramos sobre cada regla y validamos la columna correspondiente
         for rule in &rules.columns {
@@ -215,16 +221,208 @@ pub fn validate_float(value: &str, min: Option<f64>, max: Option<f64>) -> bool {
 pub fn validate_date(value: &str, before: Option<NaiveDate>, after: Option<NaiveDate>) -> bool {
     if let Ok(date) = NaiveDate::parse_from_str(value, "%Y-%m-%d") {
         if let Some(before_date) = before {
-            if date >= before_date {
+            if date > before_date {
                 return false;
             }
         }
         if let Some(after_date) = after {
-            if date <= after_date {
+            if date < after_date {
                 return false;
             }
         }
         return true;
     }
     false
+}
+
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- validate_email ---
+    #[test]
+    fn email_valid_format_is_valid() {
+        let email_regex = Regex::new(r"^[^\s@]+@[^\s@]+\.[^\s@]+$").unwrap();
+        assert!(validate_email("test@example.com", &email_regex));
+    }
+    
+    #[test]
+    fn email_invalid_format_is_invalid() {
+      let r = Regex::new(r"^[^\s@]+@[^\s@]+\.[^\s@]+$").unwrap();
+      assert!(!validate_email("not-an-email", &r));
+      assert!(!validate_email("missing@dot", &r));
+  }
+
+    // --- validate_pattern ---
+    #[test]
+    fn pattern_valid_format_is_valid() {
+        let pattern_regex = Regex::new(r"^[A-Z]{3}-\d{4}$").unwrap();
+        assert!(validate_pattern("ABC-1234", &pattern_regex));
+        assert!(!validate_pattern("abc-1234", &pattern_regex));
+    }
+
+    // --- validate_float ---
+    #[test]
+    fn float_min_boundary_is_valid() {
+        assert!(validate_float("1.0", Some(1.0), Some(10.0)));
+    }
+
+    #[test]
+    fn float_max_boundary_is_valid() {
+        assert!(validate_float("10.0", Some(1.0), Some(10.0)));
+    }
+
+    #[test]
+    fn float_below_min_is_invalid() {
+        assert!(!validate_float("0.9", Some(1.0), Some(10.0)));
+    }
+
+    #[test]
+    fn float_above_max_is_invalid() {
+        assert!(!validate_float("10.1", Some(1.0), Some(10.0)));
+    }
+
+    // --- validate_integer ---
+    #[test]
+    fn integer_min_boundary_is_valid() {
+        assert!(validate_integer("1", Some(1), Some(10)));
+    }
+
+    #[test]
+    fn integer_max_boundary_is_valid() {
+        assert!(validate_integer("10", Some(1), Some(10)));
+    }
+
+    #[test]
+    fn integer_below_min_is_invalid() {
+        assert!(!validate_integer("0", Some(1), Some(10)));
+    }
+
+    #[test]
+    fn integer_above_max_is_invalid() {
+        assert!(!validate_integer("11", Some(1), Some(10)));
+    }
+
+    #[test]
+    fn integer_no_bounds_is_valid() {
+        assert!(validate_integer("99999", None, None));
+    }
+
+    // --- validate_date ---
+    #[test]
+    fn date_exactly_on_before_is_valid() {
+        assert!(validate_date("2025-01-01", Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()), None));
+    }
+
+    #[test]
+    fn date_after_before_is_invalid() {
+        assert!(!validate_date("2025-01-02", Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()), None));
+    }
+
+    #[test]
+    fn date_exactly_on_after_is_valid() {
+        assert!(validate_date("2020-01-01", None, Some(NaiveDate::from_ymd_opt(2020, 1, 1).unwrap())));
+    }
+
+    #[test]
+    fn date_before_after_is_invalid() {
+        assert!(!validate_date("2019-12-31", None, Some(NaiveDate::from_ymd_opt(2020, 1, 1).unwrap())));
+    }
+
+    #[test]
+    fn date_invalid_format_is_invalid() {
+        assert!(!validate_date("31-01-2025", None, None));
+    }
+
+
+    // helpers
+    use crate::reader::yaml::Rules;
+    use csv::StringRecord;
+    use serde_yaml;
+
+    fn rules_from_yaml(yaml: &str) -> Rules {
+        serde_yaml::from_str(yaml).unwrap()
+    }
+
+    fn record(values: &[&str]) -> StringRecord {
+        StringRecord::from(values.to_vec())
+    }
+
+    // --- Tests de validate()
+
+    // --- required ---
+    #[test]
+    fn required_empty_cell_is_error() {
+        let rules = rules_from_yaml("columns:\n  name:\n    rule:\n      type: text\n    required: true");
+        let headers = vec!["name".to_string()];
+        let records = vec![record(&[""])];
+        let report = validate(&headers, &records, &rules);
+        assert_eq!(report.total_errors, 1);
+        assert!(report.rows_with_errors.contains(&1));
+    }
+
+    #[test]
+    fn required_spaces_only_is_error() {
+        let rules = rules_from_yaml("columns:\n  name:\n    rule:\n      type: text\n    required: true");
+        let headers = vec!["name".to_string()];
+        let records = vec![record(&["   "])];
+        let report = validate(&headers, &records, &rules);
+        assert_eq!(report.total_errors, 1);
+    }
+
+    #[test]
+    fn required_with_value_is_valid() {
+        let rules = rules_from_yaml("columns:\n  name:\n    rule:\n      type: text\n    required: true");
+        let headers = vec!["name".to_string()];
+        let records = vec![record(&["John"])];
+        let report = validate(&headers, &records, &rules);
+        assert_eq!(report.total_errors, 0);
+    }
+
+    // --- unique ---
+    #[test]
+    fn unique_duplicate_is_error() {
+        let rules = rules_from_yaml("columns:\n  email:\n    rule:\n      type: text\n    unique: true");
+        let headers = vec!["email".to_string()];
+        let records = vec![
+            record(&["a@b.com"]),
+            record(&["c@d.com"]),
+            record(&["c@d.com"]),  // duplicado de fila 2
+        ];
+        let report = validate(&headers, &records, &rules);
+        assert_eq!(report.total_errors, 1);
+        assert!(report.rows_with_errors.contains(&3));
+    }
+
+    #[test]
+    fn unique_no_duplicates_is_valid() {
+        let rules = rules_from_yaml("columns:\n  email:\n    rule:\n      type: text\n    unique: true");
+        let headers = vec!["email".to_string()];
+        let records = vec![record(&["a@b.com"]), record(&["c@d.com"])];
+        let report = validate(&headers, &records, &rules);
+        assert_eq!(report.total_errors, 0);
+    }
+
+    // --- columna en rules que no existe en CSV ---
+    #[test]
+    fn missing_column_in_csv_produces_no_errors() {
+        let rules = rules_from_yaml("columns:\n  nonexistent:\n    rule:\n      type: text\n    required: true");
+        let headers = vec!["other".to_string()];
+        let records = vec![record(&["value"])];
+        let report = validate(&headers, &records, &rules);
+        // warning en stderr, pero ningún error en el reporte
+        assert_eq!(report.total_errors, 0);
+    }
+
+    // --- columna en CSV que no está en rules ---
+    #[test]
+    fn extra_column_in_csv_is_ignored() {
+        let rules = rules_from_yaml("columns:\n  name:\n    rule:\n      type: text");
+        let headers = vec!["name".to_string(), "extra".to_string()];
+        let records = vec![record(&["John", "ignored"])];
+        let report = validate(&headers, &records, &rules);
+        assert_eq!(report.total_errors, 0);
+    }
 }
