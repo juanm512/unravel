@@ -103,6 +103,14 @@ impl Rules {
 }
 
 pub fn load(path: &PathBuf) -> Result<Rules> {
+    // check if file exists and extension is .yaml or .yml
+    if !path.exists() {
+        return Err(anyhow::anyhow!("File not found: {:?}", path));
+    }
+    if path.extension().unwrap_or_default() != "yaml" && path.extension().unwrap_or_default() != "yml" {
+        return Err(anyhow::anyhow!("Invalid file extension: {:?}", path));
+    }
+
     let file = std::fs::File::open(path)?;
     let rules: Rules = serde_yaml::from_reader(file)?;
     rules.validate()?;
